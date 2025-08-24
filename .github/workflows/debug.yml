@@ -1,0 +1,41 @@
+name: "Debug Deployment"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    name: "Debug System"
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+          
+      - name: Install Ansible
+        run: pip install ansible>=6.0
+        
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/ansible_key
+          chmod 600 ~/.ssh/ansible_key
+          
+      - name: Test SSH and system info
+        run: |
+          if [[ -z "${{ secrets.CODESPACE_URL }}" ]]; then
+            echo "❌ CODESPACE_URL secret missing!"
+            exit 1
+          fi
+          
+          echo "🔍 Testing SSH connection..."
+          ssh -i ~/.ssh/ansible_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            codespace@${{ secrets.CODESPACE_URL }} \
+            "echo '✅ SSH working'; uname -a; df -h; ps aux | grep -E '(nginx|supervisor)'"

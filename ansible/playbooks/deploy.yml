@@ -1,0 +1,246 @@
+---
+# Simplified Deployment Playbook for Lab 8
+- name: Deploy Application via GitHub Actions
+  hosts: codespace_servers
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    deployment_id: "{{ github_run_id | default(ansible_date_time.epoch) }}"
+    deployment_timestamp: "{{ ansible_date_time.iso8601 }}"
+    
+  pre_tasks:
+    - name: Display deployment info
+      debug:
+        msg: |
+          🚀 Starting deployment...
+          Target: {{ inventory_hostname }}
+          App: {{ app_name }}
+          Version: {{ app_version }}
+          Deployment ID: {{ deployment_id }}
+      tags: [always]
+      
+    - name: Check connectivity
+      wait_for_connection:
+        timeout: 30
+      tags: [preflight]
+      
+  tasks:
+    # System Setup
+    - name: Update package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 300
+      tags: [packages]
+      
+    - name: Install required packages
+      package:
+        name:
+          - python3-flask
+          - python3-pip
+          - python3-venv
+          - nginx
+          - supervisor
+          - curl
+        state: present
+      tags: [packages]
+      
+    # Directory Setup
+    - name: Create deployment directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        mode: '0755'
+      loop:
+        - "{{ app_directory }}"
+        - "{{ app_directory }}/releases"
+        - "{{ app_directory }}/shared"
+        - "{{ app_directory }}/shared/logs"
+        - "{{ app_directory }}/releases/{{ deployment_id }}"
+      tags: [directories]
+      
+    # Application Deployment
+    - name: Deploy Flask application
+      copy:
+        content: |
+          #!/usr/bin/env python3
+          from flask import Flask, jsonify
+          import datetime
+          import platform
+          import os
+          
+          app = Flask(__name__)
+          
+          @app.route('/')
+          def home():
+              return '''
+              <html>
+              <head><title>Lab 8: GitHub Actions + Ansible</title></head>
+              <body style="font-family: Arial; margin: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; min-height: 100vh;">
+                  <div style="max-width: 800px; margin: 0 auto; background: rgba(255,255,255,0.1); padding: 30px; border-radius: 20px;">
+                      <h1>🚀 GitHub Actions + Ansible Deployment</h1>
+                      <p style="color: #4CAF50; font-size: 1.2em;">✅ Successfully deployed via automated CI/CD pipeline!</p>
+                      
+                      <div style="background: rgba(255,255,255,0.2); padding: 20px; border-radius: 10px; margin: 20px 0;">
+                          <h3>📊 Deployment Information</h3>
+                          <ul style="list-style: none; padding: 0;">
+                              <li><strong>App:</strong> {{ app_name }}</li>
+                              <li><strong>Version:</strong> {{ app_version }}</li>
+                              <li><strong>Deployment ID:</strong> {{ deployment_id }}</li>
+                              <li><strong>Host:</strong> {{ inventory_hostname }}</li>
+                              <li><strong>Timestamp:</strong> {{ deployment_timestamp }}</li>
+                          </ul>
+                      </div>
+                      
+                      <div style="background: rgba(76, 175, 80, 0.2); padding: 20px; border-radius: 10px; margin: 20px 0;">
+                          <h3>✅ Lab 8 Objectives Completed</h3>
+                          <ul>
+                              <li>✅ Ansible triggered via GitHub Actions</li>
+                              <li>✅ SSH private key managed as GitHub secret</li>
+                              <li>✅ dawidd6/action-ansible-playbook used securely</li>
+                              <li>✅ Deployed to remote Codespace server</li>
+                              <li>✅ Automated CI/CD pipeline working</li>
+                          </ul>
+                      </div>
+                      
+                      <div style="text-align: center; margin-top: 30px;">
+                          <a href="/health" style="color: #4CAF50; margin: 0 10px; text-decoration: none; padding: 10px 20px; background: rgba(255,255,255,0.2); border-radius: 20px;">Health Check</a>
+                          <a href="/version" style="color: #4CAF50; margin: 0 10px; text-decoration: none; padding: 10px 20px; background: rgba(255,255,255,0.2); border-radius: 20px;">Version Info</a>
+                      </div>
+                  </div>
+              </body>
+              </html>
+              '''
+              
+          @app.route('/health')
+          def health():
+              return jsonify({
+                  'status': 'healthy',
+                  'version': '{{ app_version }}',
+                  'deployment_id': '{{ deployment_id }}',
+                  'timestamp': datetime.datetime.now().isoformat(),
+                  'host': '{{ inventory_hostname }}'
+              })
+              
+          @app.route('/version')
+          def version():
+              return jsonify({
+                  'app_version': '{{ app_version }}',
+                  'deployment_id': '{{ deployment_id }}',
+                  'deployed_at': '{{ deployment_timestamp }}',
+                  'python_version': platform.python_version()
+              })
+              
+          if __name__ == '__main__':
+              app.run(host='0.0.0.0', port={{ app_port }}, debug=False)
+        dest: "{{ app_directory }}/releases/{{ deployment_id }}/app.py"
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        mode: '0755'
+      tags: [deployment]
+      
+    # Service Configuration
+    - name: Configure Supervisor
+      copy:
+        content: |
+          [program:{{ app_name }}]
+          command={{ app_directory }}/current/app.py
+          directory={{ app_directory }}/current
+          user={{ deploy_user }}
+          autostart=true
+          autorestart=true
+          redirect_stderr=true
+          stdout_logfile={{ app_directory }}/shared/logs/app.log
+          stdout_logfile_maxbytes=50MB
+          environment=PYTHONPATH="{{ app_directory }}/current"
+        dest: "/etc/supervisor/conf.d/{{ app_name }}.conf"
+      tags: [config]
+      
+    - name: Configure Nginx
+      copy:
+        content: |
+          server {
+              listen 80;
+              server_name _;
+              location / {
+                  proxy_pass http://127.0.0.1:{{ app_port }};
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+              }
+              access_log {{ app_directory }}/shared/logs/nginx-access.log;
+              error_log {{ app_directory }}/shared/logs/nginx-error.log;
+          }
+        dest: "/etc/nginx/sites-available/{{ app_name }}"
+      tags: [config]
+      
+    # Deployment Steps
+    - name: Create current release symlink
+      file:
+        src: "{{ app_directory }}/releases/{{ deployment_id }}"
+        dest: "{{ app_directory }}/current"
+        state: link
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        force: yes
+      tags: [deployment]
+      
+    - name: Enable Nginx site
+      file:
+        src: "/etc/nginx/sites-available/{{ app_name }}"
+        dest: "/etc/nginx/sites-enabled/{{ app_name }}"
+        state: link
+      tags: [config]
+      
+    - name: Remove default Nginx site
+      file:
+        path: "/etc/nginx/sites-enabled/default"
+        state: absent
+      tags: [config]
+      
+    - name: Start services
+      service:
+        name: "{{ item }}"
+        state: restarted
+        enabled: yes
+      loop:
+        - nginx
+        - supervisor
+      tags: [services]
+      
+    - name: Update Supervisor
+      shell: supervisorctl reread && supervisorctl update
+      tags: [services]
+      
+    - name: Start application
+      supervisorctl:
+        name: "{{ app_name }}"
+        state: restarted
+      tags: [services]
+      
+    # Verification
+    - name: Wait for application
+      wait_for:
+        port: "{{ app_port }}"
+        timeout: 60
+      tags: [verify]
+      
+  post_tasks:
+    - name: Test health endpoint
+      uri:
+        url: "http://{{ ansible_host }}:{{ app_port }}/health"
+        method: GET
+        status_code: 200
+      retries: 5
+      delay: 10
+      tags: [verify]
+      
+    - name: Display success message
+      debug:
+        msg: |
+          ✅ Deployment completed successfully!
+          🌐 App URL: http://{{ ansible_host }}:{{ app_port }}
+          🏥 Health: http://{{ ansible_host }}:{{ app_port }}/health
+          📊 Version: http://{{ ansible_host }}:{{ app_port }}/version
+      tags: [summary]

@@ -1,0 +1,32 @@
+{
+  "name": "Ansible Lab Target Server",
+  "image": "ubuntu:22.04",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": false,
+      "username": "codespace",
+      "userUid": "1000",
+      "userGid": "1000"
+    },
+    "ghcr.io/devcontainers/features/sshd:1": {
+      "version": "latest"
+    }
+  },
+  "forwardPorts": [22, 80, 8080, 3000],
+  "portsAttributes": {
+    "22": {
+      "label": "SSH",
+      "visibility": "public"
+    },
+    "80": {
+      "label": "HTTP",
+      "visibility": "public"
+    },
+    "8080": {
+      "label": "App",
+      "visibility": "public"
+    }
+  },
+  "postCreateCommand": "/bin/bash .devcontainer/setup.sh",
+  "remoteUser": "codespace"
+}

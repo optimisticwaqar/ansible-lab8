@@ -1,0 +1,18 @@
+# Codespace Inventory for Lab 8
+all:
+  children:
+    codespace_servers:
+      hosts:
+        target_codespace:
+          ansible_host: "{{ codespace_host }}"
+          ansible_port: "{{ codespace_port | default(22) }}"
+          ansible_user: codespace
+          ansible_ssh_private_key_file: /tmp/ansible_key
+          ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30'
+          app_port: 8080
+      vars:
+        app_name: "lab8-demo"
+        app_version: "{{ github_sha | default('latest') }}"
+        deploy_user: codespace
+        app_directory: "/opt/deployments"
+        environment: lab
